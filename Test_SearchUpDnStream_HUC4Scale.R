@@ -15,10 +15,10 @@ library(plotly)
 #Test gage matching to select dams 
 
 #Load and format spatial data
-dams <- readOGR(dsn='Data/ReservoirGageMatching.gpkg','GRanD_Dams_v1_1_US',stringsAsFactors = F)
+dams <- readOGR(dsn='Data/GageDamMatching.gpkg','GRanD_Dams_v1_1_US',stringsAsFactors = F)
 dams$ID <- paste0(dams$EHAID,'-',dams$NIDID) #Compound identifier based on existing hydropower assets id and the id used in the National Inventory of Dams
 dams[dams$OTHERSTRUCTUREID=="NA" & !is.na(dams$OTHERSTRUCTUREID),"OTHERSTRUCTUREID"] <- NA #Keep only main dams, not supporting structures
-HUCs <- readOGR(dsn='Data/ReservoirGageMatching.gpkg','WBD_SubBasin_TestHUC0304',stringsAsFactors = F)
+HUCs <- readOGR(dsn='Data/GageDamMatching.gpkg','WBD_SubBasin_TestHUC0304',stringsAsFactors = F)
 
 #Add HUC information to the dams with a quick spatial join
 dams <- spTransform(dams,crs(HUCs))
