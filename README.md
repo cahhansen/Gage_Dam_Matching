@@ -13,5 +13,5 @@ Use existing tools (nhdplustools, dataRetrieval) and a simple approach to match 
 - USGS Gages with streamflow (parameter code=00060) and/or temperature (parameter code=00010) data from 2001-2020.
 
 
-To get a feel for the NHD network:
+## To get a feel for the NHD network:
 - NHDPlusV2 flowlines can be downloaded from https://www.epa.gov/waterdata/get-nhdplus-national-hydrography-dataset-plus-data but these are really massive datasets. (There are >2.7 million segments in the US). This is why the nhdplustools R package is so great to work with - the segment data don't have to be downloaded locally. The unique identifier of each segment is the COMID, but there are other ID's that are useful to help navigate the network (Hydroseq indicates the up/downstream segment). This has some of the key attributes, but not all. See the user guide for more info on all attributes that can be associated with each river segment: https://s3.amazonaws.com/edap-nhdplus/NHDPlusV21/Documentation/NHDPlusV2_User_Guide.pdf)
