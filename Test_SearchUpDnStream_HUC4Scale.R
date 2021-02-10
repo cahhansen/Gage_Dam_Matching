@@ -15,17 +15,10 @@ library(plotly)
 #Test gage matching to select dams 
 
 #Load and format spatial data
-dams <- readOGR(dsn='Data/GageDamMatching.gpkg','GRanD_Dams_v1_1_US',stringsAsFactors = F)
-dams$ID <- paste0(dams$EHAID,'-',dams$NIDID) #Compound identifier based on existing hydropower assets id and the id used in the National Inventory of Dams
-dams[dams$OTHERSTRUCTUREID=="NA" & !is.na(dams$OTHERSTRUCTUREID),"OTHERSTRUCTUREID"] <- NA #Keep only main dams, not supporting structures
-HUCs <- readOGR(dsn='Data/GageDamMatching.gpkg','WBD_SubBasin_TestHUC0304',stringsAsFactors = F)
-
-#Add HUC information to the dams with a quick spatial join
-dams <- spTransform(dams,crs(HUCs))
-dams <- point.in.poly(dams,HUCs)
+dams <- readOGR(dsn='Data/GageDamMatching.gpkg','GRanD_Dams_v1_1_WithHUCs',stringsAsFactors = F)
 
 #Subset to HUC used for testing
-dams_test <- dams[dams$HUC_4=='0304' & !is.na(dams$HUC_4) & is.na(dams$OTHERSTRUCTUREID),]
+dams_test <- dams[dams$HUC_4=='0304' & !is.na(dams$HUC_4),]
 plot(dams_test)
 
 
@@ -64,7 +57,7 @@ tracedam2gage <- function(inputdams,myid,idcol,namecol,xcoord,ycoord,searchmode,
     #Combine all of the info into a single data frame
     alldamgagedata <- bind_cols(data.frame(c(damtemp[,c(idcol,namecol,ycoord,xcoord,"HUC_8")],dam_comid=start_comid,levelpathid=dam_attr$levelpathi,arbolatesum=dam_attr$arbolatesu,totdasqkm=dam_attr$totdasqkm)),matched_gages[,c("identifier","comid")])
     alldamgagedata <- alldamgagedata[,-c(12)]
-    colnames(alldamgagedata) <- c("ID","NAME","LAT","LON","HUC_8","DAM_COMID","LEVELPATHID","ARBOLATE_SUM","TOTDA_SQKM","GAGE_ID","GAGE_COMID")
+    colnames(alldamgagedata) <- c("DAM_ID","DAM_NAME","DAM_LAT","DAM_LON","HUC_8","DAM_COMID","LEVELPATHID","ARBOLATE_SUM","TOTDA_SQKM","GAGE_SITE_NO","GAGE_COMID")
     if(plotting==T){
       plot(sf::st_geometry(flowline_nldi), col = "blue",main=damtemp$DAM_NAME)
       plot(start_point, cex = 2.5, lwd = 3, col = "red",pch=16, add = TRUE)
@@ -90,29 +83,29 @@ allmatcheddamgagedata_dnstrm <- bind_rows(allmatcheddamgagedata_dnstrm)
 #If a gage is listed more than once, this means the upper dam(s) need to be removed (another dam downstream is also tied to this gage, and more directly controls its flow)
 #If gage is listed for >1 dams with the same LevelPathID (they share the same downstream-most flowline), only keep the one with the highest arbolate sum
 allmatcheddamgagedata_dnstrm_final <- data.frame(allmatcheddamgagedata_dnstrm %>% 
-    group_by(GAGE_ID) %>%
+    group_by(GAGE_SITE_NO) %>%
     top_n(1,ARBOLATE_SUM))
 allmatcheddamgagedata_dnstrm_final$DATASET <- 'Downstream NWIS Site'
 
-#Apply the tracedam2gage function to dams to find the upstream gages
+#Apply the tracedam2gage function to dams to find the upstream gages. Using 100km search distance...may need to revise if this is missing gages that are further than 100km upstream.
 allmatcheddamgagedata_upstrm <- pblapply(dams_test@data$grand_id,FUN=tracedam2gage,inputdams=dams_test@data,idcol='grand_id',namecol='dam_name',xcoord='long_dd',ycoord='lat_dd',searchmode='upstreamTributaries',searchdistance=100)
 allmatcheddamgagedata_upstrm <- bind_rows(allmatcheddamgagedata_upstrm)
 
 #If gage is listed for >1 dams with the same LevelPathID, only keep the one where it matched to the dam with the smallest arbolate sum (the most upstream dam)
 allmatcheddamgagedata_upstrm_final <- data.frame(allmatcheddamgagedata_upstrm %>% 
-  group_by(GAGE_ID) %>%
+  group_by(GAGE_SITE_NO) %>%
   top_n(-1,ARBOLATE_SUM))
 allmatcheddamgagedata_upstrm_final$DATASET <- 'Upstream NWIS Site'
 
 allmatchedsites <- bind_rows((allmatcheddamgagedata_dnstrm_final),(allmatcheddamgagedata_upstrm_final)) #This is a list of all upstream and downstream matched gages listed in NWIS. There may not be recent/current data at all of these sites.
 
-#Gather information about water quality (temperature) and flow from the matched gages
+#Gather information about water quality (temperature - daily, degrees C) and flow (daily average discharge in cfs) from the matched gages
 fetchwqdata <- function(inputsites,startDate,endDate,statCodes,paramCodes){
   tempsites <-  unique(substr(inputsites,start = 6,stop = nchar(inputsites)))
   WQ.ts   <- readNWISdv(tempsites, paramCodes, startDate, endDate, statCodes)
   WQ.ts <- renameNWISColumns(WQ.ts)
   WQ.ts.sub <- subset(WQ.ts, select=-grep('cd',names(WQ.ts)))
-  WQ.locs <- data.frame(site_no=attributes(WQ.ts)$siteInfo$site_no,lat=attributes(WQ.ts)$siteInfo$dec_lat_va,lon=attributes(WQ.ts)$siteInfo$dec_lon_va,siteType=attributes(WQ.ts)$siteInfo$siteTypeCd)
+  WQ.locs <- data.frame(site_no=attributes(WQ.ts)$siteInfo$site_no,lat=attributes(WQ.ts)$siteInfo$dec_lat_va,lon=attributes(WQ.ts)$siteInfo$dec_lon_va)
   
   WQ.avg <- subset(WQ.ts.sub, select=-c(Date)) %>% group_by(site_no) %>% summarise(across(everything(), mean, na.rm=T))
   WQ.avg <- merge(WQ.avg,WQ.locs)
@@ -120,24 +113,25 @@ fetchwqdata <- function(inputsites,startDate,endDate,statCodes,paramCodes){
   return(WQ.avg)
 }
 
-#Apply the fetchwqdata function to get average flow (code=00060) and temperature (code=00003) data. If there is no data at a site (given the parameters and time period), the sites are dropped.
-wqgagedata <- fetchwqdata(inputsites=allmatchedsites$GAGE_ID,
+#Apply the fetchwqdata function to get average flow (code=00060) and temperature (code=00003) data. If there is no data at a site (given the parameters and time period), the sites are dropped. Using the past 20 years as a search period.
+wqgagedata <- fetchwqdata(inputsites=allmatchedsites$GAGE_SITE_NO,
                           startDate='2001-01-01',endDate='2020-12-31',statCodes=c('00003'),paramCodes=c('00010','00060'))
 
 wqgagedata$site_no <- paste0('USGS-',wqgagedata$site_no)
-wqgagedata_sf <- st_as_sf(wqgagedata, coords = c("lon", "lat"), crs = 4326) #I believe the NWIS data coords are in CRS=4326
+colnames(wqgagedata) <- c('GAGE_SITE_NO','AVG_DAILY_FLOW','AVG_DAILY_WTEMP','GAGE_LAT','GAGE_LON')
+wqgagedata_sf <- st_as_sf(wqgagedata, coords = c("GAGE_LON", "GAGE_LAT"), crs = 4326) #I believe the NWIS data coords are in CRS=4326
 
 #Filter out matches that had no water quality or flow data. Note that a gage could be matched as downstream of one dam and upstream of another.
-allmatchedsites_wq <- merge(allmatchedsites,wqgagedata,by.x='GAGE_ID',by.y='site_no',all.x=F)
+allmatchedsites_wq <- merge(allmatchedsites,wqgagedata,by='GAGE_SITE_NO',all.x=F)
 
 
-#Quick look at the returned sites. Note, to save on time/memory, the flow line network is not kept during the tracedam2gage function. This only shows the dams and the gages. 
+#Quick look at the returned sites. Note, to save on time/memory, the flow line network is not kept during the tracedam2gage function. This plot only shows the dams and the gages. 
 p1 <- ggplot() +
   geom_sf(data=wqgagedata_sf,size=2) +
   geom_sf(data=st_as_sf(spTransform(dams_test,crs(wqgagedata_sf))),col='red',size=3)+
   geom_text(data=dams_test@data ,aes(x=long_dd, y=lat_dd, label=grand_id),
             color = "black", check_overlap = F)+
-  geom_text(data=wqgagedata ,aes(x=lon, y=lat, label=site_no),
+  geom_text(data=wqgagedata ,aes(x=GAGE_LON, y=GAGE_LAT, label=GAGE_SITE_NO),
             color = "grey", check_overlap = F)
 
 ggplotly(p1)
